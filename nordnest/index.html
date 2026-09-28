@@ -115,9 +115,13 @@
     if (!g || e.pointerId !== g.id) return;
     var p = loc(e), dx = p.x - g.sx, bw = el.clientWidth, q = gp(p), ad = Math.abs(dx);
     if ((dx < 0) === g.fwd && (ad > pw / 4 || (ad > 24 && Date.now() - g.t < 400))) {
-      q.x = g.fwd ? -bw : bw * 2;
-      book.userMove(q, g.touch);
-      book.userStop(q);
+      // доводим лист анимацией от точки, где отпустили палец (раньше лист прыгал в конец мгновенно)
+      var fc = book.flipController, c = fc.calc;
+      book.userStop(q, true);
+      if (c) {
+        var r = fc.getBoundsRect();
+        fc.animateFlippingTo(c.getPosition(), { x: -r.pageWidth, y: c.getCorner() === 'bottom' ? r.height : 0 }, true);
+      } else if (g.fwd) book.flipNext(); else book.flipPrev();
     } else if (ad <= 5) {
       // тап: листаем кнопочной анимацией (в нужную сторону, независимо от точки)
       book.userStop(q, true);
