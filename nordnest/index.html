@@ -9,8 +9,11 @@
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
   .stage{position:fixed;inset:0 0 64px;display:flex;align-items:center;justify-content:center;padding:16px}
+  #book{touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
+  #book:active{cursor:grabbing}
   .stf__parent{background:transparent}
-  #book{box-shadow:0 16px 48px rgba(0,0,0,.45)}
+  .page{background:var(--bg);box-shadow:0 16px 48px rgba(0,0,0,.45)}
+  .page img{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none;-webkit-user-drag:none}
   .bar{position:fixed;left:0;right:0;bottom:0;height:64px;display:flex;align-items:center;justify-content:center;gap:16px;padding:0 16px env(safe-area-inset-bottom)}
   .bar button{width:48px;height:48px;border:0;border-radius:50%;background:var(--btn);color:var(--ink);cursor:pointer;display:grid;place-items:center;transition:background .2s}
   .bar button:hover{background:var(--btn-h)}
@@ -32,14 +35,23 @@
 <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
 <script>
   var N = 13, W = 540, H = 960;
-  var pages = []; for (var i = 1; i <= N; i++) pages.push('p/' + String(i).padStart(2, '0') + '.jpg');
   // страница 9:16 целиком влезает в сцену; на широком экране разворот из двух страниц
   var st = document.querySelector('.stage'), sw = st.clientWidth - 32, sh = st.clientHeight - 32;
   var spread = sw / sh > 1.1 ? 2 : 1, ph = Math.floor(Math.min(sh, sw / spread * H / W)), pw = Math.floor(ph * W / H);
-  document.getElementById('book').style.width = (pw * spread) + 'px';
-  var book = new St.PageFlip(document.getElementById('book'), {
+  var el = document.getElementById('book');
+  el.style.width = (pw * spread) + 'px';
+  // страницы — <img>, а не canvas: браузер берёт резкий файл под плотность экрана (canvas рисовал в css-пикселях)
+  var pages = [];
+  for (var i = 1; i <= N; i++) {
+    var n = String(i).padStart(2, '0'), d = document.createElement('div');
+    d.className = 'page';
+    d.innerHTML = '<img src="p/' + n + '.jpg" srcset="p/' + n + '.jpg 1080w, p/hi/' + n + '.jpg 1620w" sizes="' + pw + 'px" alt="Страница ' + i + '" decoding="async">';
+    pages.push(d);
+  }
+  var book = new St.PageFlip(el, {
     width: pw, height: ph, size: 'fixed',
-    showCover: true, usePortrait: true, maxShadowOpacity: .4, mobileScrollSupport: false
+    showCover: true, usePortrait: true, maxShadowOpacity: .5, flippingTime: 700,
+    useMouseEvents: false
   });
   var cnt = document.getElementById('cnt'), prev = document.getElementById('prev'), next = document.getElementById('next');
   function upd() {
@@ -48,12 +60,43 @@
     cnt.textContent = (b ? a + '–' + b : a) + ' / ' + N;
     prev.disabled = i === 0; next.disabled = i >= N - (o && i > 0 ? 2 : 1);
   }
-  // размер считается один раз при открытии: при повороте/смене окна перестраиваем книгу заново
-  // только при смене ширины (поворот, окно): на телефоне высота прыгает от адресной строки
+  // своё управление вместо встроенного: у библиотеки сгиб идёт от точки касания,
+  // поэтому нормально листается только с угла. Здесь хват в любой точке переносится
+  // на внешний край страницы; тап по половине листает, быстрый свайп доводит лист.
+  var g = null;
+  function loc(e) { var r = el.getBoundingClientRect(); return { x: e.clientX - r.left, y: Math.max(1, Math.min(ph - 1, e.clientY - r.top)) }; }
+  el.addEventListener('pointerdown', function (e) {
+    if (g || e.button > 0) return;
+    var p = loc(e), bw = el.clientWidth, fwd = p.x > bw / 2;
+    g = { id: e.pointerId, sx: p.x, t: Date.now(), ex: fwd ? bw - 2 : 2, fwd: fwd, touch: e.pointerType !== 'mouse' };
+    el.setPointerCapture(e.pointerId);
+    book.startUserTouch({ x: g.ex, y: p.y });
+  });
+  el.addEventListener('pointermove', function (e) {
+    if (!g || e.pointerId !== g.id) return;
+    var p = loc(e);
+    book.userMove({ x: g.ex + p.x - g.sx, y: p.y }, g.touch);
+  });
+  function end(e) {
+    if (!g || e.pointerId !== g.id) return;
+    var p = loc(e), dx = p.x - g.sx, bw = el.clientWidth, x = g.ex + dx;
+    // протянул на четверть страницы или быстро свайпнул в сторону листания — дотянуть лист до конца
+    var ad = Math.abs(dx);
+    if ((dx < 0) === g.fwd && (ad > pw / 4 || (ad > 24 && Date.now() - g.t < 400))) {
+      x = g.fwd ? -bw : bw * 2;
+      book.userMove({ x: x, y: p.y }, g.touch);
+    }
+    book.userStop({ x: x, y: p.y });
+    g = null;
+  }
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+  // размер считается при открытии; перестраиваем только при смене ширины (поворот, окно):
+  // на телефоне высота прыгает от адресной строки
   var rt, w0 = innerWidth; addEventListener('resize', function () { clearTimeout(rt); rt = setTimeout(function () { if (Math.abs(innerWidth - w0) > 40) location.reload(); }, 400); });
   book.on('init', function () { document.getElementById('load').remove(); upd(); });
   book.on('flip', upd); book.on('changeOrientation', upd);
-  book.loadFromImages(pages);
+  book.loadFromHTML(pages);
   prev.onclick = function () { book.flipPrev(); };
   next.onclick = function () { book.flipNext(); };
   addEventListener('keydown', function (e) { if (e.key === 'ArrowRight') book.flipNext(); if (e.key === 'ArrowLeft') book.flipPrev(); });
