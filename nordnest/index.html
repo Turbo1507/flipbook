@@ -139,8 +139,21 @@
     }, 400);
   });
   function mark() { history.replaceState(null, '', '#' + real(book.getCurrentPageIndex())); }
-  book.on('init', function () { document.getElementById('load').remove(); upd(); });
-  book.on('flip', function () { upd(); mark(); });
+  // десктоп: закрытая обложка (и одинокая последняя страница) — по центру, без пустой половины
+  // разворота; при открытии книга плавно съезжает в разворот
+  function center(open) {
+    if (phone) return;
+    var i = book.getCurrentPageIndex(), x = 0;
+    if (!open && i === 0) x = -pw / 2;
+    if (!open && i === N - 1 && N % 2 === 0) x = pw / 2;
+    el.style.transform = x ? 'translateX(' + x + 'px)' : '';
+  }
+  book.on('init', function () {
+    document.getElementById('load').remove(); upd(); center();
+    requestAnimationFrame(function () { el.style.transition = 'transform .6s ease'; });
+  });
+  book.on('flip', function () { upd(); mark(); center(); });
+  book.on('changeState', function (e) { if (e.data !== 'read') center(true); else center(); });
   // полный экран: во встроенном браузере iOS (Telegram, Safari) не поддержан — кнопку прячем
   if (!(document.fullscreenEnabled || document.webkitFullscreenEnabled)) document.getElementById('fs').hidden = true;
   book.loadFromHTML(pages);
