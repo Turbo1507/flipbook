@@ -4,10 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>NordNest</title>
+<meta name="description" content="Владейте 10% премиального отеля на Бали. Зарабатывайте более $3 200 ежемесячно">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://turbo1507.github.io/flipbook/nordnest/">
+<meta property="og:title" content="NordNest · Kintamani, Бали">
+<meta property="og:description" content="Владейте 10% премиального отеля на Бали. Зарабатывайте более $3 200 ежемесячно">
+<meta property="og:image" content="https://turbo1507.github.io/flipbook/nordnest/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#1c1c1c">
 <style>
   :root{--bg:#1c1c1c;--ink:#f2f2f2;--dim:rgba(242,242,242,.55);--btn:rgba(255,255,255,.08);--btn-h:rgba(255,255,255,.16)}
   *{box-sizing:border-box}
-  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden;overscroll-behavior:none;-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
+  button{touch-action:manipulation}
   .stage{position:fixed;inset:0 0 64px;display:flex;align-items:center;justify-content:center;padding:16px}
   #book{touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
   #book:active{cursor:grabbing}
@@ -51,8 +62,12 @@
   var book = new St.PageFlip(el, {
     width: pw, height: ph, size: 'fixed',
     showCover: true, usePortrait: true, maxShadowOpacity: .5, flippingTime: 700,
-    useMouseEvents: false
+    useMouseEvents: false, startPage: Math.max(0, Math.min(N - 1, (parseInt(location.hash.slice(1), 10) || 1) - 1))
   });
+  // встроенный браузер Telegram сворачивается свайпом вниз, а iOS зумит двойным тапом:
+  // страница не скроллится, поэтому любой touchmove гасим, жест остаётся за книгой
+  document.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+  document.addEventListener('dblclick', function (e) { e.preventDefault(); });
   var cnt = document.getElementById('cnt'), prev = document.getElementById('prev'), next = document.getElementById('next');
   function upd() {
     var i = book.getCurrentPageIndex(), o = book.getOrientation() === 'landscape';
@@ -91,11 +106,22 @@
   }
   el.addEventListener('pointerup', end);
   el.addEventListener('pointercancel', end);
-  // размер считается при открытии; перестраиваем только при смене ширины (поворот, окно):
-  // на телефоне высота прыгает от адресной строки
-  var rt, w0 = innerWidth; addEventListener('resize', function () { clearTimeout(rt); rt = setTimeout(function () { if (Math.abs(innerWidth - w0) > 40) location.reload(); }, 400); });
+  // размер считается при открытии. Перестраиваем при смене ширины (поворот, окно) или если
+  // книга перестала влезать по высоте / освободилось много места (панели Telegram и Safari
+  // меняют высоту после открытия). Мелкие прыжки высоты игнорируем, открытая страница — в #N
+  var rt, w0 = innerWidth;
+  addEventListener('resize', function () {
+    clearTimeout(rt);
+    rt = setTimeout(function () {
+      var h = st.clientHeight - 32;
+      if (Math.abs(innerWidth - w0) > 40 || h < ph - 2 || (h - ph > 80 && pw * spread < st.clientWidth - 48)) location.reload();
+    }, 400);
+  });
+  function mark() { history.replaceState(null, '', '#' + (book.getCurrentPageIndex() + 1)); }
   book.on('init', function () { document.getElementById('load').remove(); upd(); });
-  book.on('flip', upd); book.on('changeOrientation', upd);
+  book.on('flip', function () { upd(); mark(); }); book.on('changeOrientation', upd);
+  // полный экран: во встроенном браузере iOS (Telegram, Safari) не поддержан — кнопку прячем
+  if (!(document.fullscreenEnabled || document.webkitFullscreenEnabled)) document.getElementById('fs').hidden = true;
   book.loadFromHTML(pages);
   prev.onclick = function () { book.flipPrev(); };
   next.onclick = function () { book.flipNext(); };
