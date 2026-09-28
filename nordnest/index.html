@@ -23,8 +23,15 @@
   #book{touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
   #book:active{cursor:grabbing}
   .stf__parent{background:transparent}
-  .page{background:var(--bg);box-shadow:0 16px 48px rgba(0,0,0,.45)}
-  .page img{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none;-webkit-user-drag:none}
+  .stage.phone{justify-content:flex-end}
+  .page{background:var(--bg);border-radius:2px;box-shadow:0 2px 4px rgba(0,0,0,.35),0 24px 56px rgba(0,0,0,.55)}
+  .page.--left{border-radius:2px 0 0 2px}
+  .page.--right{border-radius:0 2px 2px 0}
+  .page img{display:block;width:100%;height:100%;object-fit:cover;border-radius:inherit;pointer-events:none;-webkit-user-drag:none}
+  /* изгиб у корешка: затемнение к сгибу, как у бумажного разворота */
+  .page::after{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit}
+  .page.--left::after{background:linear-gradient(to left,rgba(0,0,0,.28),rgba(0,0,0,.08) 4%,transparent 12%)}
+  .page.--right::after{background:linear-gradient(to right,rgba(0,0,0,.28),rgba(0,0,0,.08) 4%,transparent 12%)}
   .bar{position:fixed;left:0;right:0;bottom:0;height:64px;display:flex;align-items:center;justify-content:center;gap:16px;padding:0 16px env(safe-area-inset-bottom)}
   .bar button{width:48px;height:48px;border:0;border-radius:50%;background:var(--btn);color:var(--ink);cursor:pointer;display:grid;place-items:center;transition:background .2s}
   .bar button:hover{background:var(--btn-h)}
@@ -45,24 +52,31 @@
 </div>
 <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
 <script>
-  var N = 13, W = 540, H = 960;
-  // страница 9:16 целиком влезает в сцену; на широком экране разворот из двух страниц
+  var N = 13, W = 540, H = 960, S = 40;
+  // Широкий экран: разворот из двух страниц по центру. Узкий (телефон): страница крупно справа,
+  // а слева полоса S от стопки перелистнутых — разворот шире экрана, левая половина уходит за край.
+  // Чтобы листать по одной, левая страница каждого разворота — копия предыдущей (как оборот листа).
   var st = document.querySelector('.stage'), sw = st.clientWidth - 32, sh = st.clientHeight - 32;
-  var spread = sw / sh > 1.1 ? 2 : 1, ph = Math.floor(Math.min(sh, sw / spread * H / W)), pw = Math.floor(ph * W / H);
+  var phone = sw / sh <= 1.1;
+  var ph = Math.floor(Math.min(sh, (phone ? sw - S : sw / 2) * H / W)), pw = Math.floor(ph * W / H);
   var el = document.getElementById('book');
-  el.style.width = (pw * spread) + 'px';
+  el.style.width = (pw * 2) + 'px';
+  if (phone) { st.classList.add('phone'); el.style.marginRight = Math.max(0, Math.floor((sw - S - pw) / 2)) + 'px'; }
+  var seq = [1]; for (var k = 2; k <= N; k++) { if (phone) seq.push(k - 1); seq.push(k); }
   // страницы — <img>, а не canvas: браузер берёт резкий файл под плотность экрана (canvas рисовал в css-пикселях)
-  var pages = [];
-  for (var i = 1; i <= N; i++) {
-    var n = String(i).padStart(2, '0'), d = document.createElement('div');
+  var pages = seq.map(function (k) {
+    var n = String(k).padStart(2, '0'), d = document.createElement('div');
     d.className = 'page';
-    d.innerHTML = '<img src="p/' + n + '.jpg" srcset="p/' + n + '.jpg 1080w, p/hi/' + n + '.jpg 1620w" sizes="' + pw + 'px" alt="Страница ' + i + '" decoding="async">';
-    pages.push(d);
-  }
+    d.innerHTML = '<img src="p/' + n + '.jpg" srcset="p/' + n + '.jpg 1080w, p/hi/' + n + '.jpg 1620w" sizes="' + pw + 'px" alt="Страница ' + k + '" decoding="async">';
+    return d;
+  });
+  // индекс библиотеки → номер страницы PDF и обратно (на телефоне видна правая страница разворота)
+  function real(i) { return phone ? (i === 0 ? 1 : Math.floor((i + 1) / 2) + 1) : i + 1; }
+  function idx(k) { return phone ? (k <= 1 ? 0 : 2 * k - 3) : k - 1; }
   var book = new St.PageFlip(el, {
     width: pw, height: ph, size: 'fixed',
-    showCover: true, usePortrait: true, maxShadowOpacity: .5, flippingTime: 700,
-    useMouseEvents: false, startPage: Math.max(0, Math.min(N - 1, (parseInt(location.hash.slice(1), 10) || 1) - 1))
+    showCover: true, usePortrait: false, maxShadowOpacity: .7, flippingTime: 800,
+    useMouseEvents: false, startPage: idx(Math.max(1, Math.min(N, parseInt(location.hash.slice(1), 10) || 1)))
   });
   // встроенный браузер Telegram сворачивается свайпом вниз, а iOS зумит двойным тапом:
   // страница не скроллится, поэтому любой touchmove гасим, жест остаётся за книгой
@@ -70,38 +84,45 @@
   document.addEventListener('dblclick', function (e) { e.preventDefault(); });
   var cnt = document.getElementById('cnt'), prev = document.getElementById('prev'), next = document.getElementById('next');
   function upd() {
-    var i = book.getCurrentPageIndex(), o = book.getOrientation() === 'landscape';
-    var a = i + 1, b = o && i > 0 && i < N - 1 ? i + 2 : null;
+    var i = book.getCurrentPageIndex(), a = real(i), b = !phone && i > 0 && i < N - 1 ? i + 2 : null;
     cnt.textContent = (b ? a + '–' + b : a) + ' / ' + N;
-    prev.disabled = i === 0; next.disabled = i >= N - (o && i > 0 ? 2 : 1);
+    prev.disabled = i === 0; next.disabled = phone ? a >= N : i >= N - (i > 0 ? 2 : 1);
   }
   // своё управление вместо встроенного: у библиотеки сгиб идёт от точки касания,
   // поэтому нормально листается только с угла. Здесь хват в любой точке переносится
-  // на внешний край страницы; тап по половине листает, быстрый свайп доводит лист.
+  // на край листа; тап листает, протяжка на четверть страницы или быстрый свайп доводит лист.
+  // Телефон: вперёд — правые 70% видимой страницы, назад — стопка и левые 30%.
   var g = null;
+  function gp(p) { return { x: g.ex + p.x - g.sx, y: Math.max(1, Math.min(ph - 1, g.y0 + (p.y - g.sy) * .25)) }; }
   function loc(e) { var r = el.getBoundingClientRect(); return { x: e.clientX - r.left, y: Math.max(1, Math.min(ph - 1, e.clientY - r.top)) }; }
   el.addEventListener('pointerdown', function (e) {
     if (g || e.button > 0) return;
-    var p = loc(e), bw = el.clientWidth, fwd = p.x > bw / 2;
-    g = { id: e.pointerId, sx: p.x, t: Date.now(), ex: fwd ? bw - 2 : 2, fwd: fwd, touch: e.pointerType !== 'mouse' };
+    var p = loc(e), bw = el.clientWidth, fwd = phone ? p.x > pw + pw * .3 : p.x > bw / 2;
+    // на телефоне левый край разворота за экраном — назад тянем от видимого края стопки
+    var back = phone ? Math.max(2, Math.round(-el.getBoundingClientRect().left) + 2) : 2;
+    // высота хвата — у угла (10% от края), как в штатной анимации: от пальца посередине
+    // библиотека задирала угол листа к центру и сгиб выходил перекошенным
+    g = { id: e.pointerId, sx: p.x, sy: p.y, y0: p.y >= ph / 2 ? ph * .9 : ph * .1, t: Date.now(), ex: fwd ? bw - 2 : back, fwd: fwd, touch: e.pointerType !== 'mouse' };
     el.setPointerCapture(e.pointerId);
-    book.startUserTouch({ x: g.ex, y: p.y });
+    book.startUserTouch(gp(p));
   });
   el.addEventListener('pointermove', function (e) {
     if (!g || e.pointerId !== g.id) return;
     var p = loc(e);
-    book.userMove({ x: g.ex + p.x - g.sx, y: p.y }, g.touch);
+    book.userMove(gp(p), g.touch);
   });
   function end(e) {
     if (!g || e.pointerId !== g.id) return;
-    var p = loc(e), dx = p.x - g.sx, bw = el.clientWidth, x = g.ex + dx;
-    // протянул на четверть страницы или быстро свайпнул в сторону листания — дотянуть лист до конца
-    var ad = Math.abs(dx);
+    var p = loc(e), dx = p.x - g.sx, bw = el.clientWidth, q = gp(p), ad = Math.abs(dx);
     if ((dx < 0) === g.fwd && (ad > pw / 4 || (ad > 24 && Date.now() - g.t < 400))) {
-      x = g.fwd ? -bw : bw * 2;
-      book.userMove({ x: x, y: p.y }, g.touch);
-    }
-    book.userStop({ x: x, y: p.y });
+      q.x = g.fwd ? -bw : bw * 2;
+      book.userMove(q, g.touch);
+      book.userStop(q);
+    } else if (ad <= 5) {
+      // тап: листаем кнопочной анимацией (в нужную сторону, независимо от точки)
+      book.userStop(q, true);
+      if (g.fwd) book.flipNext(); else book.flipPrev();
+    } else book.userStop(q);
     g = null;
   }
   el.addEventListener('pointerup', end);
@@ -113,16 +134,20 @@
   addEventListener('resize', function () {
     clearTimeout(rt);
     rt = setTimeout(function () {
-      var h = st.clientHeight - 32;
-      if (Math.abs(innerWidth - w0) > 40 || h < ph - 2 || (h - ph > 80 && pw * spread < st.clientWidth - 48)) location.reload();
+      var h = st.clientHeight - 32, wide = (st.clientWidth - 32) / h > 1.1;
+      if (Math.abs(innerWidth - w0) > 40 || wide === phone || h < ph - 2 || (h - ph > 80 && ph < Math.floor((phone ? sw - S : sw / 2) * H / W) - 8)) location.reload();
     }, 400);
   });
-  function mark() { history.replaceState(null, '', '#' + (book.getCurrentPageIndex() + 1)); }
+  function mark() { history.replaceState(null, '', '#' + real(book.getCurrentPageIndex())); }
   book.on('init', function () { document.getElementById('load').remove(); upd(); });
-  book.on('flip', function () { upd(); mark(); }); book.on('changeOrientation', upd);
+  book.on('flip', function () { upd(); mark(); });
   // полный экран: во встроенном браузере iOS (Telegram, Safari) не поддержан — кнопку прячем
   if (!(document.fullscreenEnabled || document.webkitFullscreenEnabled)) document.getElementById('fs').hidden = true;
   book.loadFromHTML(pages);
+  // у библиотеки длительность пропорциональна пути листа: на узком телефоне и после свайпа
+  // выходило 0.1–0.4 с — рывок. Своя: 0.5 с + по пути, не дольше 1 с
+  // (контроллер появляется только после loadFrom*)
+  book.flipController.getAnimationDuration = function (n) { return Math.min(1000, 500 + n * 0.6); };
   prev.onclick = function () { book.flipPrev(); };
   next.onclick = function () { book.flipNext(); };
   addEventListener('keydown', function (e) { if (e.key === 'ArrowRight') book.flipNext(); if (e.key === 'ArrowLeft') book.flipPrev(); });
